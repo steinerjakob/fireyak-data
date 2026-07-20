@@ -1,0 +1,16 @@
+{
+    "attributes": {
+        "type": true,
+        "id": true,
+        "version": true,
+        "changeset": false,
+        "timestamp": true,
+        "uid": false,
+        "user": false,
+        "way_nodes": false
+    },
+    "linear_tags": false,
+    "area_tags": ["emergency=fire_water_pond", "emergency=water_tank", "amenity=fire_station", "building"],
+    "exclude_tags": [],
+    "include_tags": []
+}
