@@ -94,12 +94,13 @@ ogr2ogr -f FlatGeobuf "$FGB" "$GEOJSONSEQ" \
 PMT="${OUT}/water_sources.pmtiles"
 log "Building PMTiles with tippecanoe..."
 tippecanoe -o "$PMT" \
-    -l water_sources \
-    -Z4 -z14 -B10 \
-    --drop-densest-as-needed \
-    --extend-zooms-if-still-dropping \
-    --force \
-    "$GEOJSONSEQ"
+  -t 1 \
+  -l water_sources \
+  -Z4 -z14 -B10 \
+  --drop-densest-as-needed \
+  --extend-zooms-if-still-dropping \
+  --force \
+  "$GEOJSONSEQ"
 
 # ------------------------------------------------- 5. metadata
 META="${OUT}/metadata.json"
