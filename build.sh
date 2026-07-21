@@ -3,23 +3,24 @@
 # FireYak data pipeline
 # 1. Download planet (first run) / apply daily diffs (subsequent runs)
 # 2. Filter fire-fighting water sources
-# 3. Export to FlatGeobuf + PMTiles
-# 4. Upload to a rolling GitHub Release
+# 3. Export to FlatGeobuf (spatial-indexed) + PMTiles
+# 4. Upload to Cloudflare R2
 #
-# Required env:
-#   GITHUB_TOKEN   - fine-grained PAT with "contents: read/write" on the data repo
-#   GITHUB_REPO    - e.g. "steinerjakob/fireyak-data"
+# Required env (for upload):
+#   R2_ACCESS_KEY  - R2 API token access key id
+#   R2_SECRET      - R2 API token secret
+#   R2_ENDPOINT    - https://<accountid>.r2.cloudflarestorage.com
+#   R2_BUCKET      - e.g. "fireyak-data"
 # Optional env:
 #   PLANET_URL     - default: planet.osm.org latest
-#   RELEASE_TAG    - default: "latest"
 #   SKIP_UPLOAD=1  - build only, no upload (for benchmarking)
+#   SKIP_UPDATE=1  - skip pyosmium diff apply (laptop bootstrap; saves 2x planet space)
 
 set -euo pipefail
 
 DATA_DIR="${DATA_DIR:-/data}"
 PLANET="${DATA_DIR}/planet.osm.pbf"
 PLANET_URL="${PLANET_URL:-https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf}"
-RELEASE_TAG="${RELEASE_TAG:-latest}"
 WORK="${DATA_DIR}/work"
 OUT="${DATA_DIR}/out"
 LOCK="${DATA_DIR}/.pipeline.lock"
@@ -43,17 +44,21 @@ if [ ! -f "$PLANET" ]; then
     mv "${PLANET}.part" "$PLANET"
     log "Planet download complete."
 else
-    log "Applying replication diffs to planet file..."
-    # rewrites the planet file; needs ~80 GB free scratch space on the same volume
-    pyosmium-up-to-date --size 20000 -v "$PLANET" || {
-        rc=$?
-        # exit code 1 = still not fully up to date (more diffs than --size allows) - fine
-        if [ "$rc" -gt 1 ]; then
-            log "pyosmium-up-to-date failed with exit code $rc"
-            exit "$rc"
-        fi
-    }
-    log "Planet update complete."
+    if [ "${SKIP_UPDATE:-0}" = "1" ]; then
+        log "SKIP_UPDATE set - using existing planet file as-is (no diff apply)."
+    else
+        log "Applying replication diffs to planet file..."
+        # rewrites the planet file; needs ~80 GB free scratch space on the same volume
+        pyosmium-up-to-date --size 20000 -v "$PLANET" || {
+            rc=$?
+            # exit code 1 = still not fully up to date (more diffs than --size allows) - fine
+            if [ "$rc" -gt 1 ]; then
+                log "pyosmium-up-to-date failed with exit code $rc"
+                exit "$rc"
+            fi
+        }
+        log "Planet update complete."
+    fi
 fi
 
 # ------------------------------------------------- 2. filter water sources
@@ -78,10 +83,11 @@ osmium export "$FILTERED" \
 
 # ------------------------------------------------- 4a. FlatGeobuf (bbox queries / nearby search)
 FGB="${OUT}/water_sources.fgb"
-log "Building FlatGeobuf..."
+log "Building FlatGeobuf (spatial-indexed)..."
 ogr2ogr -f FlatGeobuf "$FGB" "$GEOJSONSEQ" \
     -nlt GEOMETRY \
     -nln water_sources \
+    -lco SPATIAL_INDEX=YES \
     --config OGR_GEOJSON_MAX_OBJ_SIZE 0
 
 # ------------------------------------------------- 4b. PMTiles (map display)
@@ -97,12 +103,13 @@ tippecanoe -o "$PMT" \
 
 # ------------------------------------------------- 5. metadata
 META="${OUT}/metadata.json"
-FEATURES=$(osmium fileinfo -e -g data.count.nodes "$FILTERED" 2>/dev/null || echo "n/a")
+FEATURES=$(osmium fileinfo -e -g data.count.nodes "$FILTERED" 2>/dev/null || echo 0)
 cat > "$META" <<EOF
 {
   "generated_at": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
-  "source": "OpenStreetMap (ODbL) - https://www.openstreetmap.org/copyright",
   "planet_timestamp": "$(osmium fileinfo -e -g header.option.timestamp "$PLANET" 2>/dev/null || echo unknown)",
+  "feature_count": ${FEATURES},
+  "source": "OpenStreetMap (ODbL) - https://www.openstreetmap.org/copyright",
   "filters": ["emergency=fire_hydrant","emergency=water_tank","emergency=suction_point","emergency=fire_water_pond","amenity=fire_station"]
 }
 EOF
@@ -110,27 +117,31 @@ EOF
 log "Outputs:"
 ls -lh "$OUT"
 
-# ------------------------------------------------- 6. upload to rolling release
+# ------------------------------------------------- 6. upload to Cloudflare R2
 if [ "${SKIP_UPLOAD:-0}" = "1" ]; then
     log "SKIP_UPLOAD set - done without uploading."
     exit 0
 fi
 
-: "${GITHUB_TOKEN:?GITHUB_TOKEN is required}"
-: "${GITHUB_REPO:?GITHUB_REPO is required}"
-export GH_TOKEN="$GITHUB_TOKEN"
+: "${R2_ACCESS_KEY:?R2_ACCESS_KEY is required}"
+: "${R2_SECRET:?R2_SECRET is required}"
+: "${R2_ENDPOINT:?R2_ENDPOINT is required}"
+: "${R2_BUCKET:?R2_BUCKET is required}"
 
-log "Uploading to GitHub release '$RELEASE_TAG' in $GITHUB_REPO..."
-if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPO" >/dev/null 2>&1; then
-    gh release create "$RELEASE_TAG" --repo "$GITHUB_REPO" \
-        --title "Latest water source data" \
-        --notes "Rolling release, updated automatically. Data (c) OpenStreetMap contributors, ODbL."
-fi
-gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPO" --clobber \
-    "$FGB" "$PMT" "$META"
+# configure rclone remote from env (no persistent config file needed)
+export RCLONE_CONFIG_R2_TYPE=s3
+export RCLONE_CONFIG_R2_PROVIDER=Cloudflare
+export RCLONE_CONFIG_R2_ACCESS_KEY_ID="$R2_ACCESS_KEY"
+export RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="$R2_SECRET"
+export RCLONE_CONFIG_R2_ENDPOINT="$R2_ENDPOINT"
+export RCLONE_CONFIG_R2_ACL=private   # served via custom domain, not r2.dev ACL
 
-# keep the release timestamp fresh so consumers can check recency
-gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPO" \
-    --notes "Updated: $(date -u '+%Y-%m-%d %H:%M UTC'). Data (c) OpenStreetMap contributors, ODbL."
+log "Uploading outputs to R2 bucket '$R2_BUCKET'..."
+# upload to temp names, then move into place, so readers never see a half-written file
+for f in water_sources.fgb water_sources.pmtiles metadata.json; do
+    rclone copyto "${OUT}/${f}" "r2:${R2_BUCKET}/${f}.tmp" --s3-no-check-bucket
+    rclone moveto "r2:${R2_BUCKET}/${f}.tmp" "r2:${R2_BUCKET}/${f}" --s3-no-check-bucket
+    log "  uploaded ${f}"
+done
 
 log "Upload complete. Done."

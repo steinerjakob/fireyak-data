@@ -22,12 +22,11 @@ RUN git clone --depth 1 https://github.com/felt/tippecanoe.git /tmp/tippecanoe \
     && make -C /tmp/tippecanoe install \
     && rm -rf /tmp/tippecanoe
 
-# GitHub CLI for uploading release assets
-RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-        -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-        > /etc/apt/sources.list.d/github-cli.list \
-    && apt-get update && apt-get install -y --no-install-recommends gh \
+# rclone for uploading to Cloudflare R2 (S3-compatible)
+RUN curl -fsSL https://downloads.rclone.org/rclone-current-linux-amd64.deb \
+        -o /tmp/rclone.deb \
+    && apt-get update && apt-get install -y /tmp/rclone.deb \
+    && rm -f /tmp/rclone.deb \
     && rm -rf /var/lib/apt/lists/*
 
 COPY build.sh /usr/local/bin/build.sh
