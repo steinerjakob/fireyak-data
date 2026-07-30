@@ -136,8 +136,9 @@ export RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="$R2_SECRET"
 export RCLONE_CONFIG_R2_ENDPOINT="$R2_ENDPOINT"
 export RCLONE_CONFIG_R2_ACL=private   # served via custom domain, not r2.dev ACL
 
-log "Uploading outputs to R2 bucket '$R2_BUCKET'..."
-# upload to temp names, then move into place, so readers never see a half-written file
+log "Uploading outputs to the root of R2 bucket '$R2_BUCKET'..."
+# upload to temp names, then move into place, so readers never see a half-written file.
+# metadata.json is last so its freshness signal only flips after the data files land.
 for f in water_sources.fgb water_sources.pmtiles metadata.json; do
     rclone copyto "${OUT}/${f}" "r2:${R2_BUCKET}/${f}.tmp" --s3-no-check-bucket
     rclone moveto "r2:${R2_BUCKET}/${f}.tmp" "r2:${R2_BUCKET}/${f}" --s3-no-check-bucket

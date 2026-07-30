@@ -1,5 +1,5 @@
 # FireYak data pipeline
-# osmium-tool + pyosmium (planet updates) + GDAL (FlatGeobuf) + tippecanoe (PMTiles) + gh (upload)
+# osmium-tool + pyosmium (planet updates) + GDAL (FlatGeobuf) + tippecanoe (PMTiles) + rclone (R2 upload)
 FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive

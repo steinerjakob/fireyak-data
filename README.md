@@ -2,7 +2,7 @@
 
 Self-published static OpenStreetMap extracts of fire-fighting infrastructure, built on a schedule and served as static files.
 
-The pipeline filters the OSM planet file down to five feature types, converts them to formats that support HTTP range requests, and publishes them to a rolling GitHub Release. Consumers read only the bytes they need for a given bounding box — no API server, no rate limits.
+The pipeline filters the OSM planet file down to five feature types, converts them to formats that support HTTP range requests, and publishes them to a Cloudflare R2 bucket. Consumers read only the bytes they need for a given bounding box — no API server, no rate limits.
 
 Data © OpenStreetMap contributors, licensed under [ODbL](https://www.openstreetmap.org/copyright).
 
@@ -26,12 +26,12 @@ All original OSM tags are preserved, plus `@id` (`node/123`, `way/456`), `@versi
 | `water_sources.pmtiles` | [PMTiles](https://docs.protomaps.com/pmtiles/) | vector tiles for map rendering (z4–z14) |
 | `metadata.json` | JSON | build time, planet timestamp, applied filters |
 
-Published to the `latest` release tag. Assets are replaced in place (`gh release upload --clobber`), so the download URLs stay stable across rebuilds:
+Written to the root of the R2 bucket and replaced in place on every rebuild, so the URLs stay stable. Each file is uploaded to a temporary key and then moved into place, so readers never see a half-written object; `metadata.json` is uploaded last, after the data files have landed. Served through the bucket's public custom domain:
 
 ```
-https://github.com/<owner>/<repo>/releases/download/latest/water_sources.fgb
-https://github.com/<owner>/<repo>/releases/download/latest/water_sources.pmtiles
-https://github.com/<owner>/<repo>/releases/download/latest/metadata.json
+https://data.fireyak.org/water_sources.fgb
+https://data.fireyak.org/water_sources.pmtiles
+https://data.fireyak.org/metadata.json
 ```
 
 ## How it works
@@ -51,10 +51,10 @@ planet.osm.pbf ──┬─► first run:  full download (~80 GB)
      ogr2ogr → .fgb        tippecanoe → .pmtiles
               └─────────┬─────────┘
                         ▼
-              gh release upload --clobber
+              rclone upload → Cloudflare R2 → data.fireyak.org
 ```
 
-A lock file guards against overlapping runs. If a run fails, the previous release stays live — consumers just see slightly older data.
+A lock file guards against overlapping runs. If a run fails, the previously uploaded objects stay live — consumers just see slightly older data.
 
 ## Running it
 
@@ -82,14 +82,16 @@ The mounted `/data` directory holds `planet.osm.pbf`, a `work/` scratch dir, and
 
 | Variable | Required | Default |
 |---|---|---|
-| `GITHUB_TOKEN` | for upload | — |
-| `GITHUB_REPO` | for upload | — |
+| `R2_ACCESS_KEY` | for upload | — |
+| `R2_SECRET` | for upload | — |
+| `R2_ENDPOINT` | for upload | — |
+| `R2_BUCKET` | for upload | — |
 | `SKIP_UPLOAD` | no | `0` |
+| `SKIP_UPDATE` | no | `0` |
 | `PLANET_URL` | no | planet.openstreetmap.org latest |
-| `RELEASE_TAG` | no | `latest` |
 | `DATA_DIR` | no | `/data` |
 
-`GITHUB_TOKEN` should be a fine-grained PAT scoped to this repository with **Contents: read and write**. Keep it in an env file outside version control (`chmod 600`) — token expiry is the most likely cause of a silent failure, so set a calendar reminder.
+The R2 credentials come from an R2 API token (**Object Read & Write**, scoped to the target bucket). `R2_ENDPOINT` is `https://<account-id>.r2.cloudflarestorage.com`. Keep them in an env file outside version control (`chmod 600`, and it's in `.gitignore`) — a revoked or expired token is the most likely cause of a silent upload failure.
 
 ### Scheduling
 
@@ -104,14 +106,14 @@ npm install flatgeobuf pmtiles
 ```ts
 import { deserialize } from 'flatgeobuf/lib/mjs/geojson';
 
-const FGB = 'https://github.com/<owner>/<repo>/releases/download/latest/water_sources.fgb';
+const FGB = 'https://data.fireyak.org/water_sources.fgb';
 
 for await (const feature of deserialize(FGB, { minX, minY, maxX, maxY })) {
   // GeoJSON feature with all OSM tags + @id / @version / @timestamp
 }
 ```
 
-FlatGeobuf's spatial index means only the relevant chunks are fetched. These are plain HTTPS range requests against GitHub's CDN, so they work from browsers and mobile runtimes without special transports.
+FlatGeobuf's spatial index means only the relevant chunks are fetched. These are plain HTTPS range requests against R2's CDN, so they work from browsers and mobile runtimes without special transports. Make sure the bucket's CORS policy allows range requests (`GET`, `HEAD`, and the `Range` header) from your app's origin.
 
 If you also query the live OSM API (Overpass or similar) for freshness, merge by `@id` with the higher `@version` winning, and treat features missing from the live response as still present — an incomplete live response is not a deletion.
 
@@ -132,6 +134,6 @@ Then spot-check a hydrant you know against openstreetmap.org.
 
 ## Files
 
-- `Dockerfile` — osmium-tool, pyosmium, GDAL, tippecanoe, GitHub CLI
+- `Dockerfile` — osmium-tool, pyosmium, GDAL, tippecanoe, rclone
 - `build.sh` — the pipeline
 - `export-config.json` — osmium export attributes and area-tag rules
