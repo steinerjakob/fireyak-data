@@ -2,7 +2,7 @@
 
 Self-published static OpenStreetMap extracts of fire-fighting infrastructure, built on a schedule and served as static files.
 
-The pipeline filters the OSM planet file down to five feature types, converts them to formats that support HTTP range requests, and publishes them to a Cloudflare R2 bucket. Consumers read only the bytes they need for a given bounding box — no API server, no rate limits.
+The pipeline filters the OSM planet file down to five feature types (plus out-of-service water sources), converts them to formats that support HTTP range requests, and publishes them to a Cloudflare R2 bucket. Consumers read only the bytes they need for a given bounding box — no API server, no rate limits.
 
 Data © OpenStreetMap contributors, licensed under [ODbL](https://www.openstreetmap.org/copyright).
 
@@ -15,6 +15,10 @@ Data © OpenStreetMap contributors, licensed under [ODbL](https://www.openstreet
 | `emergency=water_tank` | point / area |
 | `emergency=fire_water_pond` | point / area |
 | `amenity=fire_station` | point / area |
+| `disused:emergency=fire_hydrant` / `suction_point` | point |
+| `disused:emergency=water_tank` / `fire_water_pond` | point / area |
+
+The `disused:` rows are out-of-service water sources. The OSM wiki tags them with the lifecycle prefix: `emergency=fire_hydrant` is replaced by `disused:emergency=fire_hydrant`. They are kept so the FireYak app can show them as out of service instead of dropping them.
 
 All original OSM tags are preserved, plus `@id` (`node/123`, `way/456`), `@version`, and `@timestamp`.
 

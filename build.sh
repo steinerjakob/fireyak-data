@@ -62,6 +62,9 @@ else
 fi
 
 # ------------------------------------------------- 2. filter water sources
+# Out-of-service sources use the OSM lifecycle prefix (the hydrant wiki:
+# emergency=fire_hydrant is replaced by disused:emergency=fire_hydrant). They
+# are kept so the app can show them as out of service instead of dropping them.
 FILTERED="${WORK}/water_sources.osm.pbf"
 log "Filtering fire-fighting water sources from planet (1.5-4 h on a DS423+)..."
 osmium tags-filter "$PLANET" \
@@ -69,6 +72,10 @@ osmium tags-filter "$PLANET" \
     nwr/emergency=water_tank \
     nwr/emergency=suction_point \
     nwr/emergency=fire_water_pond \
+    nwr/disused:emergency=fire_hydrant \
+    nwr/disused:emergency=water_tank \
+    nwr/disused:emergency=suction_point \
+    nwr/disused:emergency=fire_water_pond \
     nwr/amenity=fire_station \
     --overwrite -o "$FILTERED"
 log "Filter complete: $(du -h "$FILTERED" | cut -f1)"
@@ -110,7 +117,7 @@ cat > "$META" <<EOF
   "planet_timestamp": "$(osmium fileinfo -e -g header.option.timestamp "$PLANET" 2>/dev/null || echo unknown)",
   "feature_count": ${FEATURES},
   "source": "OpenStreetMap (ODbL) - https://www.openstreetmap.org/copyright",
-  "filters": ["emergency=fire_hydrant","emergency=water_tank","emergency=suction_point","emergency=fire_water_pond","amenity=fire_station"]
+  "filters": ["emergency=fire_hydrant","emergency=water_tank","emergency=suction_point","emergency=fire_water_pond","disused:emergency=fire_hydrant","disused:emergency=water_tank","disused:emergency=suction_point","disused:emergency=fire_water_pond","amenity=fire_station"]
 }
 EOF
 
