@@ -62,22 +62,28 @@ A lock file guards against overlapping runs. If a run fails, the previously uplo
 
 ## Running it
 
-Everything lives in one Docker image:
+Everything lives in one Docker image. GitHub Actions ([`build-image.yml`](.github/workflows/build-image.yml)) builds it on every push to `main` that touches `Dockerfile`, `build.sh` or `export-config.json`, and publishes it to GitHub Container Registry:
 
 ```bash
-docker build -t fireyak-pipeline .
+docker pull ghcr.io/steinerjakob/fireyak-data:latest
+```
+
+Each build is also tagged with its commit SHA, so you can pin a known-good version. To build locally instead:
+
+```bash
+docker build -t ghcr.io/steinerjakob/fireyak-data:latest .
 ```
 
 Build only, no upload (useful for the first run or benchmarking):
 
 ```bash
-docker run --rm -v /path/to/osm-data:/data -e SKIP_UPLOAD=1 fireyak-pipeline
+docker run --rm -v /path/to/osm-data:/data -e SKIP_UPLOAD=1 ghcr.io/steinerjakob/fireyak-data:latest
 ```
 
 Full run with upload:
 
 ```bash
-docker run --rm -v /path/to/osm-data:/data --env-file /path/to/env fireyak-pipeline
+docker run --rm -v /path/to/osm-data:/data --env-file /path/to/env ghcr.io/steinerjakob/fireyak-data:latest
 ```
 
 The mounted `/data` directory holds `planet.osm.pbf`, a `work/` scratch dir, and the final `out/`. Budget roughly 250 GB — the planet file plus a temporary copy written during the diff-apply step.
@@ -100,6 +106,15 @@ The R2 credentials come from an R2 API token (**Object Read & Write**, scoped to
 ### Scheduling
 
 Any cron-like scheduler works — the container is stateless apart from the mounted volume. On modest hardware a full run takes several hours (diff-apply and filtering dominate), so an overnight schedule every day or two is a reasonable cadence. On constrained hosts, `--cpus` and `--cpu-shares` keep the machine responsive during a run.
+
+Pull before each run so the host picks up new images automatically. An unchanged image makes the pull a quick no-op:
+
+```bash
+IMAGE=ghcr.io/steinerjakob/fireyak-data:latest
+docker pull "$IMAGE"
+docker run --rm -v /path/to/osm-data:/data --env-file /path/to/env "$IMAGE"
+docker image prune -f   # drop the superseded, now-untagged image
+```
 
 ## Consuming the data
 
@@ -141,3 +156,4 @@ Then spot-check a hydrant you know against openstreetmap.org.
 - `Dockerfile` — osmium-tool, pyosmium, GDAL, tippecanoe, rclone
 - `build.sh` — the pipeline
 - `export-config.json` — osmium export attributes and area-tag rules
+- `.github/workflows/build-image.yml` — builds and publishes the image to GHCR
