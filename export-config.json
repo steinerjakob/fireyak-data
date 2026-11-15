@@ -10,7 +10,14 @@
         "way_nodes": false
     },
     "linear_tags": false,
-    "area_tags": ["emergency=fire_water_pond", "emergency=water_tank", "amenity=fire_station", "building"],
+    "area_tags": [
+        "emergency=fire_water_pond",
+        "emergency=water_tank",
+        "disused:emergency=fire_water_pond",
+        "disused:emergency=water_tank",
+        "amenity=fire_station",
+        "building"
+    ],
     "exclude_tags": [],
     "include_tags": []
 }
